@@ -8,12 +8,14 @@
 <meta property="og:type" content="website">
 <meta property="og:title" content="Delivery Boi Engagement">
 <meta property="og:description" content="The team's daily schedule, tasks and chat.">
-<meta property="og:url" content="https://YOUR-SITE.example/">
-<meta property="og:image" content="https://YOUR-SITE.example/preview.jpg">
+<meta property="og:url" content="https://serenedump.github.io/EngagementDeliveryBoi/">
+<meta property="og:image" content="https://serenedump.github.io/EngagementDeliveryBoi/preview.jpg">
+<meta property="og:image:width" content="1390">
+<meta property="og:image:height" content="695">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Delivery Boi Engagement">
 <meta name="twitter:description" content="The team's daily schedule, tasks and chat.">
-<meta name="twitter:image" content="https://YOUR-SITE.example/preview.jpg">
+<meta name="twitter:image" content="https://serenedump.github.io/EngagementDeliveryBoi/preview.jpg">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@1,125,900&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@700;800&display=swap" rel="stylesheet">
@@ -317,7 +319,7 @@ section[aria-label="Calendar"] .head{box-shadow:0 8px 20px -12px rgba(190,90,10,
   </div>
   <section class="card" id="admin" aria-label="Admin tools" hidden><div class="head"><h2>Admin tools</h2></div>
     <p class="sum">Export or summarize your team's engagement.</p>
-    <div class="arow"><button type="button" id="csvWkBtn">Download CSV (week)</button><button type="button" id="csvBtn">Download CSV (month)</button><button type="button" id="sumBtn">Copy weekly summary</button></div>
+    <div class="arow"><button type="button" id="csvWkBtn">Download CSV (week)</button><button type="button" id="csvBtn">Download CSV (month)</button><button type="button" id="sumBtn">Copy weekly summary</button><button type="button" id="opensBtn">Download CSV (who opened links)</button></div>
     <textarea id="adminOut" rows="7" readonly hidden aria-label="Weekly summary"></textarea><div id="memberBox"><h3>Members</h3><div id="memberList"></div></div><div id="groupBox"><h3>Groups</h3><div id="groupList"></div><form id="grpForm" autocomplete="off"><input id="grpName" maxlength="30" placeholder="Group name (same name updates it)" aria-label="Group name"><details><summary id="grpSum">Members: none</summary><div id="grpMembers"></div></details><button class="go" type="submit">Save group</button></form></div></section>
   <section class="card team" aria-label="Team progress"><div class="head"><h2 id="teamTitle">Team</h2></div><div id="team"></div></section>
   <section class="card chat" aria-label="Team chat"><div class="head"><h2>Team chat</h2></div>
@@ -437,7 +439,18 @@ const firebaseConfig={
    var ref=fdb.doc("members/"+uid),snap=await ref.get(),d=snap.exists?snap.data():{};
    myName=String(d.name||hint||"Member").slice(0,40);
    admin=!!d.admin;
-   if(!snap.exists)await ref.set({name:myName,joined:Date.now()});
+   if(!snap.exists){
+    var first=false;
+    try{
+     var any=await fdb.collection("members").limit(1).get();
+     if(any.empty){
+      var oref=fdb.doc("meta/owner");
+      first=await fdb.runTransaction(async function(tx){var o=await tx.get(oref);if(o.exists)return false;tx.set(oref,{uid:uid,at:Date.now()});tx.set(ref,{name:myName,joined:Date.now(),admin:true});return true});
+     }
+    }catch(e){console.error("First-admin setup skipped",e);first=false}
+    if(first)admin=true;
+    else{try{await ref.set({name:myName,joined:Date.now()})}catch(e){console.error(e)}}
+   }
    U={
     id:async function(){return uid},
     me:async function(){return{name:myName}},
@@ -500,6 +513,12 @@ function drawCal(){
   b.setAttribute("aria-label",dt.toDateString()+", "+its.length+" items");
   b.onclick=()=>{sel=dt;render()};el.appendChild(b)}
 }
+const VK="deliveryboi_opened";let VIS=new Set;try{VIS=new Set(JSON.parse(localStorage.getItem(VK)||"[]"))}catch(e){}
+const markVis=id=>{VIS.add(id);try{localStorage.setItem(VK,JSON.stringify([...VIS]))}catch(e){}};
+const OPENED=new Set;
+function logOpen(id,x){markVis(id);if(!online||!db||!uid||OPENED.has(id))return;OPENED.add(id);
+ db.doc("opens/"+uid).set({o:{[id]:{at:Date.now(),t:String(x.t||"").slice(0,200),u:String(x.u||"").slice(0,500)}}},{merge:true}).catch(e=>console.error(e))}
+const needOpen=(x,id)=>!!safeUrl(x.u)&&!VIS.has(id);
 function drawList(){
  if(document.activeElement&&document.activeElement.classList.contains("ni"))return;
  document.getElementById("dayTitle").textContent=sel.toLocaleDateString("en",{weekday:"long",month:"long",day:"numeric"});
@@ -512,9 +531,11 @@ function drawList(){
  L.innerHTML="";
  its.forEach(x=>{if(!x.auto&&editKey===key(sel)+"#"+(x.id||x.i)){L.appendChild(editRow(x));return}const id=iid(sel,x),r=document.createElement("div");r.className="item"+(mine().has(id)?" done":"");
   const cb=document.createElement("input");cb.type="checkbox";cb.checked=mine().has(id);cb.setAttribute("aria-label","Mark as engaged");
-  cb.onchange=()=>{cb.checked?mine().add(id):mine().delete(id);saveMine();render()};if(mineOnly(x,ME))r.appendChild(cb);else{cb.disabled=true;cb.checked=false;cb.setAttribute("aria-label","Not assigned to you");r.appendChild(cb);r.style.opacity=".65"}
+  cb.onchange=()=>{if(cb.checked&&needOpen(x,id)){cb.checked=false;alert("Open the link first, then come back and tick the box.");return}cb.checked?mine().add(id):mine().delete(id);saveMine();render()};if(mineOnly(x,ME))r.appendChild(cb);else{cb.disabled=true;cb.checked=false;cb.setAttribute("aria-label","Not assigned to you");r.appendChild(cb);r.style.opacity=".65"}
   const su=safeUrl(x.u),title=su?'<a href="'+esc(su)+'" target="_blank" rel="noopener">'+esc(x.t)+"</a>":esc(x.t);
   r.insertAdjacentHTML("beforeend",'<span class="tag '+x.ty+'">'+(x.ty==="a"?"Article":"Video")+"</span><div><b>"+title+"</b><small>"+fmt(x.tm)+(x.auto?" · Suggested":" · Added")+(x.to&&x.to.length?" · For "+esc(forLabel(x)):"")+(x.sr?" · ↻ repeats":"")+"</small></div>");
+  {const la=r.querySelector("a");if(la){const mv=()=>{logOpen(id,x);if(!mine().has(id)){const c=r.querySelector("input[type=checkbox]");if(c&&!c.disabled)c.setAttribute("aria-label","Mark as engaged")}};la.addEventListener("click",mv);la.addEventListener("auxclick",mv)}}
+  if(needOpen(x,id)&&!cb.disabled){const hn=document.createElement("small");hn.textContent="Open the link first";hn.style.color="var(--mute)";r.lastElementChild.appendChild(hn)}
   r.lastElementChild.appendChild(rxEl(key(sel),id));
   if(!x.auto&&(!online||x.by===uid||canEditAll)){const bt=document.createElement("button");const ac=document.createElement("span"),eb=document.createElement("button");ac.className="acts";
   eb.type="button";eb.className="del";eb.textContent="Edit";eb.onclick=()=>{editKey=key(sel)+"#"+(x.id||x.i);drawList()};
@@ -528,7 +549,7 @@ function drawList(){
 }
 let noteOpen=null;
 function streakOf(set,u){let n=0,d=new Date(today.getFullYear(),today.getMonth(),today.getDate());for(let i=0;i<120;i++){const its=items(d,u);if(its.length&&its.every(x=>set.has(iid(d,x))))n++;else if(i>0)break;d=new Date(d.getFullYear(),d.getMonth(),d.getDate()-1)}return n}
-function allDone(){const ids=items(sel).map(x=>iid(sel,x)),full=ids.every(i=>mine().has(i));ids.forEach(i=>full?mine().delete(i):mine().add(i));saveMine();render()}
+function allDone(){const its=items(sel),ids=its.map(x=>iid(sel,x)),full=ids.every(i=>mine().has(i));its.forEach(x=>{const i=iid(sel,x);if(full)mine().delete(i);else if(!needOpen(x,i))mine().add(i)});saveMine();render()}
 function setReact(k,id,p){const u=uid||"local",d=S.react[k]=S.react[k]||{},m=d[id]=d[id]||{},nx=Object.assign({e:"",n:""},m[u],p);m[u]=nx;
  if(online)queue(()=>db.doc("reactions/"+k).set({r:{[id]:{[u]:nx}}},{merge:true}));else saveLocal();render()}
 function rxEl(k,id){
@@ -627,6 +648,18 @@ function csvDl(dts,name){
  a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1500)}
 document.getElementById("csvBtn").onclick=()=>{const y=sel.getFullYear(),mo=sel.getMonth(),dim=new Date(y,mo+1,0).getDate(),d=[];for(let i=1;i<=dim;i++)d.push(new Date(y,mo,i));csvDl(d,"engagement-"+key(sel).slice(0,7)+".csv")};
 document.getElementById("csvWkBtn").onclick=()=>{const s0=new Date(sel.getFullYear(),sel.getMonth(),sel.getDate()-sel.getDay()),d=[];for(let i=0;i<7;i++)d.push(new Date(s0.getFullYear(),s0.getMonth(),s0.getDate()+i));csvDl(d,"engagement-week-"+key(s0)+".csv")};
+document.getElementById("opensBtn").onclick=async e=>{
+ const btn=e.currentTarget,t0=btn.textContent;if(!online||!canEditAll)return;btn.disabled=true;btn.textContent="Loading...";
+ try{const snap=await db.collection("opens").get(),q=v=>{v=String(v==null?"":v);if(/^[=+\-@\t\r]/.test(v))v="'"+v;return '"'+v.replace(/"/g,'""')+'"'},
+  rows=[["Member","Date","Item","Link","Opened at","Checked done"]];
+  snap.docs.forEach(d=>{const u=d.id,o=(d.data()||{}).o||{},set=S.done[u]||new Set;
+   Object.keys(o).forEach(id=>{const v=o[id]||{};rows.push([names[u]||"Member",id.slice(0,10),v.t||"",v.u||"",v.at?new Date(v.at).toLocaleString("en-CA",{hour12:false}):"",set.has(id)?"Yes":"No"])})});
+  rows.sort((a,b)=>String(a[1]).localeCompare(String(b[1]))||String(a[0]).localeCompare(String(b[0])));
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+rows.map(r=>r.map(q).join(",")).join("\r\n")],{type:"text/csv"}));
+  a.download="link-opens-"+key(today)+".csv";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+  if(rows.length<2)alert("No one has opened a link yet.")}
+ catch(er){console.error(er);alert("Could not load. Check your Firebase rules for the opens collection.")}
+ btn.disabled=false;btn.textContent=t0};
 document.getElementById("sumBtn").onclick=async e=>{
  const btn=e.currentTarget,D=d=>d.toLocaleDateString("en",{month:"short",day:"numeric"}),us=[...new Set([...S.roster,uid])],ds=[];
  for(let i=6;i>=0;i--)ds.push(new Date(today.getFullYear(),today.getMonth(),today.getDate()-i));
@@ -649,8 +682,8 @@ async function drawTeam(){
  const wDts=[];for(let i=0;i<7;i++)wDts.push(new Date(today.getFullYear(),today.getMonth(),today.getDate()-i));
  const tid=(u,ds)=>{const o=[];ds.forEach(dt=>items(dt,u).forEach(x=>o.push(iid(dt,x))));return o};
  const rows=ids.map(u=>{const set=S.done[u]||new Set,dI=tid(u,[sel]),mI=tid(u,mDts),wI=tid(u,wDts),c=a=>a.filter(i=>set.has(i)).length;return{u,n:c(dI),dt:dI.length,m:c(mI),mt:mI.length,w:c(wI),wt:wI.length,st:streakOf(set,u),name:(names[u]||"Someone")+(u===uid?" (you)":"")}});
- const medals=["🥇","🥈","🥉"],top=rows.filter(r=>r.w>0).sort((a,b)=>b.w-a.w).slice(0,3),
-  lb=top.length?"<h3>Top engagers · last 7 days</h3>"+top.map((r,i)=>`<div class="who"><span class="medal">${medals[i]}</span><div class="nm">${esc(r.name)}<small>${r.w} of ${r.wt} items</small></div><div class="bar"><i style="width:${Math.round(100*r.w/Math.max(1,r.wt))}%"></i></div></div>`).join(""):"";
+ const medals=["🥇","🥈","🥉","4","5"],gof=u=>Object.values(S.groups||{}).filter(g=>g&&(g.m||[]).includes(u)).map(g=>g.name),top=rows.filter(r=>r.w>0).sort((a,b)=>b.w-a.w).slice(0,5),
+  lb=top.length?"<h3>Top engagers · last 7 days</h3>"+top.map((r,i)=>`<div class="who"><span class="medal">${medals[i]}</span><div class="nm">${esc(r.name)}<small>${r.w} of ${r.wt} items</small><small style="display:block">👥 ${esc(gof(r.u).join(", ")||"No group")}</small></div><div class="bar"><i style="width:${Math.round(100*r.w/Math.max(1,r.wt))}%"></i></div></div>`).join(""):"";
  const grp=(title,f,cls,label)=>{const g=rows.filter(f);return g.length?"<h3>"+title+" ("+g.length+")</h3>"+g.map(r=>'<div class="who"><div class="nm">'+esc(r.name)+(r.st>=2?`<span class="bdg" title="${r.st}-day streak">${r.st>=30?"🏆":r.st>=7?"⭐":"🔥"} ${r.st}</span>`:"")+"<small>Month: "+r.m+" of "+r.mt+"</small></div><div class=\"bar\"><i style=\"width:"+Math.round(100*r.n/Math.max(1,r.dt))+'%"></i></div><span class="pill '+cls+'">'+label(r)+"</span></div>").join(""):""};
  T.innerHTML=lb+grp("Not engaged yet",r=>r.dt>0&&r.n===0,"no",r=>"0/"+r.dt)+grp("In progress",r=>r.n>0&&r.n<r.dt,"mid",r=>r.n+"/"+r.dt)+grp("All done",r=>r.dt>0&&r.n>=r.dt,"ok",r=>"Done")||'<div class="empty">No members yet.</div>';
 }
@@ -683,6 +716,7 @@ render();
  online=true;ME=uid;S.items={};S.done={};S.react={};S.groups={};S.admins=new Set;
  const bad=e=>console.error(e);
  db.collection("items").onSnapshot(s=>{S.items={};s.docs.forEach(d=>S.items[d.id]=d.data().list||[]);render()},bad);
+ db.doc("opens/"+uid).onSnapshot(s=>{const o=(s.data()||{}).o||{};Object.keys(o).forEach(i=>{OPENED.add(i);VIS.add(i)});try{localStorage.setItem(VK,JSON.stringify([...VIS]))}catch(e){}render()},bad);
  db.collection("done").onSnapshot(s=>{S.done={};s.docs.forEach(d=>S.done[d.id]=new Set(d.data().ids||[]));render()},bad);
  db.collection("members").onSnapshot(s=>{S.roster=s.docs.map(d=>d.id);S.admins=new Set(s.docs.filter(d=>(d.data()||{}).admin===true).map(d=>d.id));s.docs.forEach(d=>{const n=(d.data()||{}).name;if(n)names[d.id]=n});if(uid)canEditAll=S.admins.has(uid);render()},bad);
  db.collection("groups").onSnapshot(s=>{S.groups={};s.docs.forEach(d=>{const v=d.data()||{};S.groups[d.id]={name:v.name||"Group",m:Array.isArray(v.m)?v.m:[]}});render()},bad);
@@ -764,7 +798,7 @@ window.__chatStart=function(){if(online&&db)start()};window.__chatStart();
 <script>
 (function(){
  var _b=drawBanner;
- drawBanner=function(){_b();if(online){var b=document.getElementById("banner"),w=document.createElement("div");w.style.cssText="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end";b.style.flexWrap="wrap";[["Change name",window.__changeName],["Password",window.__changePw],["Sign out",window.__signOut]].concat(window.__needEmail&&window.__needEmail()?[["Add recovery email",window.__addEmail]]:[]).forEach(function(p){var x=document.createElement("button");x.type="button";x.textContent=p[0];x.onclick=p[1];w.appendChild(x)});b.appendChild(w)}};
+ drawBanner=function(){_b();if(online){var b=document.getElementById("banner"),w=document.createElement("div");w.style.cssText="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end";b.style.flexWrap="wrap";(online&&canEditAll?[["Admin",function(){var a=document.getElementById("admin");a.hidden=false;a.scrollIntoView({behavior:"smooth",block:"start"})}]]:[]).concat([["Change name",window.__changeName],["Password",window.__changePw],["Sign out",window.__signOut]]).concat(window.__needEmail&&window.__needEmail()?[["Add recovery email",window.__addEmail]]:[]).forEach(function(p){var x=document.createElement("button");x.type="button";x.textContent=p[0];x.onclick=p[1];w.appendChild(x)});b.appendChild(w)}};
  if(typeof render==="function")drawBanner();
 })();
 </script>
